@@ -111,6 +111,15 @@ fate-matroska-mpegts-remux: CMD = transcode mpegts $(TARGET_SAMPLES)/mpegts/pmtc
 FATE_MATROSKA_FFPROBE-$(call ALLYES, MATROSKA_DEMUXER) += fate-matroska-spherical-mono
 fate-matroska-spherical-mono: CMD = run ffprobe$(PROGSSUF)$(EXESUF) -show_entries stream_side_data_list -select_streams v -v 0 $(TARGET_SAMPLES)/mkv/spherical.mkv
 
+FATE_MATROSKA_FFMPEG_FFPROBE-$(call ALLYES, MATROSKA_DEMUXER) += fate-matroska-dovi-config-profile5
+fate-matroska-dovi-config-profile5: CMD = run ffprobe$(PROGSSUF)$(EXESUF) -show_entries stream_side_data_list -select_streams v -v 0 $(TARGET_SAMPLES)/mkv/dovi-p5.mkv
+
+FATE_MATROSKA_FFMPEG_FFPROBE-$(call ALLYES, FILE_PROTOCOL PIPE_PROTOCOL \
+                                            MOV_DEMUXER MATROSKA_MUXER \
+                                            FRAMECRC_MUXER) \
+                               += fate-matroska-dovi-write-config
+fate-matroska-dovi-write-config: CMD = transcode mov $(TARGET_SAMPLES)/hevc/dv84.mov matroska "-c:v copy" "-map 0 -c copy" "" "-show_entries stream_side_data_list -select_streams v -v 0"
+
 FATE_SAMPLES_AVCONV += $(FATE_MATROSKA-yes)
 FATE_SAMPLES_FFPROBE += $(FATE_MATROSKA_FFPROBE-yes)
 FATE_SAMPLES_FFMPEG_FFPROBE += $(FATE_MATROSKA_FFMPEG_FFPROBE-yes)

@@ -27,6 +27,7 @@
 #include "version.h"
 #include "libavutil/bprint.h"
 #include "libavutil/parseutils.h"
+#include "stdio.h"
 
 /**
  * @file
@@ -319,6 +320,8 @@ static int parse_header(AVCodecContext *avctx,
     AVBPrint buf;
 
     av_bprint_init(&buf, 0, INT_MAX);
+    printf("attribute => %s", attr_data);
+    printf("ttml_data => %s\n\n", ttml_data);
     av_bprintf(&buf, TTML_HEADER,
                attr_data, ttml_data);
 
@@ -389,6 +392,7 @@ static int parse_header_from_extradata(AVCodecContext *avctx) {
                                        AV_INPUT_BUFFER_PADDING_SIZE;
     if(avctx->extradata_size > base_extradata_size)
     {
+    printf("extradata= %s\n", avctx->extradata);
         char *attr_data =
                 (char *)avctx->extradata + TTMLENC_EXTRADATA_SIGNATURE_SIZE;
         size_t attr_size = av_strnlen(
@@ -530,19 +534,24 @@ static av_cold int ttml_init(AVCodecContext *avctx)
     int ret = 0;
 
     LIBXML_TEST_VERSION
-
+    printf("ttml_init\n");
     if(avctx->extradata_size >= 0)
     {
-        ret = parse_header_from_extradata(avctx);
-        if(ret < 0)
-            return ret;
+
+        printf("ttml_init2\n");
+        
+        //ret = parse_header_from_extradata(avctx);
     }
     else
     {
-        ret = parse_header(avctx, TTML_DEFAULT_NAMESPACING, "");
-        if(ret < 0)
-            return ret;
+        printf("ttml_init2\n");
+        //ret = parse_header(avctx, TTML_DEFAULT_NAMESPACING, "");
+        //if(ret < 0)
+          //  return ret;
     }
+    ret = parse_header(avctx, TTML_DEFAULT_NAMESPACING, "");
+    if(ret < 0)
+    	return ret;
     if(!ttml->style_count)
     {
         /* set default stuff */

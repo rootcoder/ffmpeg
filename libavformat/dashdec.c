@@ -28,6 +28,7 @@
 #include "avio_internal.h"
 #include "dash.h"
 #include "demux.h"
+#include <signal.h>
 
 #define INITIAL_BUFFER_SIZE 32768
 
@@ -115,6 +116,8 @@ struct representation {
     uint32_t init_sec_buf_read_offset;
     int64_t cur_timestamp;
     int is_restart_needed;
+    int is_subtitle;
+    int is_last;
 };
 
 typedef struct DASHContext {
@@ -444,6 +447,7 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
     av_dict_copy(&tmp, *opts, 0);
     av_dict_copy(&tmp, opts2, 0);
     ret = avio_open2(pb, url, AVIO_FLAG_READ, c->interrupt_callback, &tmp);
+    av_log(s, AV_LOG_ERROR, "avio_open2 %s %d\n", url, ret);
     if (ret >= 0) {
         // update cookies on http response with setcookies.
         char *new_cookies = NULL;
@@ -711,6 +715,8 @@ static int parse_manifest_segmenttimeline(AVFormatContext *s, struct representat
             }
             attr = attr->next;
             xmlFree(val);
+            if (rep->is_subtitle)
+                av_log(s, AV_LOG_VERBOSE, "parse_manifest_segmenttimeline t[%"PRId64"] d[%"PRId64"]  r[%"PRId64"]\n", tml->starttime, tml->duration, tml->repeat);
         }
         err = av_dynarray_add_nofree(&rep->timelines, &rep->n_timelines, tml);
         if (err < 0) {
@@ -896,6 +902,10 @@ static int parse_manifest_representation(AVFormatContext *s, const char *url,
             av_freep(&rep);
             return AVERROR(ENOMEM);
         }
+    }
+    if (type == AVMEDIA_TYPE_SUBTITLE) {
+        rep->is_subtitle = 1;
+        rep->is_last = 0;
     }
     rep->parent = s;
     representation_segmenttemplate_node = find_child_node_by_name(representation_node, "SegmentTemplate");
@@ -1096,12 +1106,15 @@ static int parse_manifest_representation(AVFormatContext *s, const char *url,
 
     switch (type) {
     case AVMEDIA_TYPE_VIDEO:
+        rep->is_subtitle = 0;
         ret = av_dynarray_add_nofree(&c->videos, &c->n_videos, rep);
         break;
     case AVMEDIA_TYPE_AUDIO:
+        rep->is_subtitle = 0;
         ret = av_dynarray_add_nofree(&c->audios, &c->n_audios, rep);
         break;
     case AVMEDIA_TYPE_SUBTITLE:
+        rep->is_subtitle = 1;
         ret = av_dynarray_add_nofree(&c->subtitles, &c->n_subtitles, rep);
         break;
     }
@@ -1239,7 +1252,7 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
     char *val  = NULL;
     uint32_t period_duration_sec = 0;
     uint32_t period_start_sec = 0;
-
+    av_log(s, AV_LOG_VERBOSE, "Refreshing manifest !!! %s\n", url);
     if (!in) {
         close_in = 1;
 
@@ -1262,7 +1275,9 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
             ret = AVERROR_INVALIDDATA;
     } else {
         LIBXML_TEST_VERSION
-
+        // printf("\n");
+        // fwrite(buf.str, 1, buf.len, stdout);
+        // printf("\n");
         doc = xmlReadMemory(buf.str, buf.len, c->base_url, NULL, 0);
         root_element = xmlDocGetRootElement(doc);
         node = root_element;
@@ -1578,6 +1593,30 @@ static int refresh_manifest(AVFormatContext *s)
         }
     }
 
+
+    for (i = 0; i < n_subtitles; i++) {
+        struct representation *cur_sub = subtitles[i]; // current state
+        struct representation *ccur_sub = c->subtitles[i]; // next state
+        if (cur_sub->timelines) {
+            // calc current time
+            av_log(c, AV_LOG_VERBOSE, "refresh_manifest() seq[%"PRId64"] / fraq_scale[%"PRId64"]\n", cur_sub->cur_seq_no, cur_sub->fragment_timescale);
+            int64_t currentTime = get_segment_start_time_based_on_timeline(cur_sub, cur_sub->cur_seq_no) / cur_sub->fragment_timescale;
+            // update segments
+            av_log(c, AV_LOG_VERBOSE, "refresh_manifest() currentTime[%"PRId64"]\n", currentTime);
+            ccur_sub->cur_seq_no = calc_next_seg_no_from_timelines(ccur_sub, currentTime * cur_sub->fragment_timescale - 1);
+            av_log(c, AV_LOG_VERBOSE, "refresh_manifest() new cur_seq_no[%"PRId64"]\n", ccur_sub->cur_seq_no);
+            if (ccur_sub->cur_seq_no >= 0) { 
+                move_timelines(ccur_sub, cur_sub, c);
+                cur_sub->is_last = 0;
+            } else {
+                cur_sub->is_last = 1;
+            }
+        }
+        if (cur_sub->fragments) {
+            move_segments(ccur_sub, cur_sub, c);
+        }
+    }
+
 finish:
     // restore context
     if (c->base_url)
@@ -1610,6 +1649,7 @@ static struct fragment *get_current_fragment(struct representation *pls)
     DASHContext *c = pls->parent->priv_data;
 
     while (( !ff_check_interrupt(c->interrupt_callback)&& pls->n_fragments > 0)) {
+        av_log(pls->parent, AV_LOG_VERBOSE, "while inside: %"PRId64" %d\n", pls->cur_seq_no, pls->n_fragments);
         if (pls->cur_seq_no < pls->n_fragments) {
             seg_ptr = pls->fragments[pls->cur_seq_no];
             seg = av_mallocz(sizeof(struct fragment));
@@ -1631,20 +1671,22 @@ static struct fragment *get_current_fragment(struct representation *pls)
         }
     }
     if (c->is_live) {
+        av_log(pls->parent, AV_LOG_VERBOSE, "get_current_fragment 1: seq[%"PRId64"]\n", pls->cur_seq_no);
         min_seq_no = calc_min_seg_no(pls->parent, pls);
         max_seq_no = calc_max_seg_no(pls, c);
 
         if (pls->timelines || pls->fragments) {
+            av_log(pls->parent, AV_LOG_VERBOSE, "get_current_fragment 2: seq[%"PRId64"]\n", pls->cur_seq_no);
             refresh_manifest(pls->parent);
         }
         if (pls->cur_seq_no <= min_seq_no) {
             av_log(pls->parent, AV_LOG_VERBOSE, "old fragment: cur[%"PRId64"] min[%"PRId64"] max[%"PRId64"]\n", (int64_t)pls->cur_seq_no, min_seq_no, max_seq_no);
             pls->cur_seq_no = calc_cur_seg_no(pls->parent, pls);
         } else if (pls->cur_seq_no > max_seq_no) {
-            av_log(pls->parent, AV_LOG_VERBOSE, "new fragment: min[%"PRId64"] max[%"PRId64"]\n", min_seq_no, max_seq_no);
+            av_log(pls->parent, AV_LOG_VERBOSE, "new fragment(%s): %"PRId64" | min[%"PRId64"] | max[%"PRId64"]\n", pls->url_template, pls->cur_seq_no, min_seq_no, max_seq_no);
         }
         seg = av_mallocz(sizeof(struct fragment));
-        if (!seg) {
+        if (!seg || pls->cur_seq_no > max_seq_no) {
             return NULL;
         }
     } else if (pls->cur_seq_no <= pls->last_seq_no) {
@@ -1799,6 +1841,7 @@ restart:
         free_fragment(&v->cur_seg);
         v->cur_seg = get_current_fragment(v);
         if (!v->cur_seg) {
+            printf("EOF 1!!!\n");
             ret = AVERROR_EOF;
             goto end;
         }
@@ -1834,18 +1877,38 @@ restart:
         v->cur_seg = get_current_fragment(v);
     }
     if (!v->cur_seg) {
+        av_log(v->parent, AV_LOG_VERBOSE, "EOF 2: %s\n", v->url_template);
         ret = AVERROR_EOF;
         goto end;
     }
     ret = read_from_url(v, v->cur_seg, buf, buf_size);
-    if (ret > 0)
+    if (ret > 0) {
+        // fwrite(buf, 1, ret, stdout);
+        if (v->is_subtitle) {
+            int64_t max_seq_no = calc_max_seg_no(v, c);
+            if (v->cur_seq_no == max_seq_no) {
+                v->is_last = 1;
+            }
+        }  
+        av_log(v->parent, AV_LOG_VERBOSE, "EOF 3: %s %d\n", v->cur_seg->url, ret);
+        av_log(v->parent, AV_LOG_VERBOSE, "EOF 3: %c %c %c %c %c %c %c \n", buf[ret-7], buf[ret-6], buf[ret-5], buf[ret-4], buf[ret-3], buf[ret-2], buf[ret-1]);
         goto end;
+    }
+
+    if (v->is_subtitle) {
+        // fwrite(buf, 1, buf_size, stdout);
+    }
+
+    av_log(v->parent, AV_LOG_VERBOSE, "EOF 5: %s %d %d\n", v->cur_seg->url, ret, AVERROR_EOF);
 
     if (c->is_live || v->cur_seq_no < v->last_seq_no) {
+        av_log(v->parent, AV_LOG_VERBOSE, "restart: %s %"PRId64" %"PRId64"\n", v->cur_seg->url, v->cur_seq_no, v->last_seq_no);
         if (!v->is_restart_needed)
             v->cur_seq_no++;
         v->is_restart_needed = 1;
     }
+
+    // raise(SIGTRAP);
 
 end:
     return ret;
@@ -2218,7 +2281,7 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
         rep = c->subtitles[i];
         if (!rep->ctx)
             continue;
-        if (!cur || rep->cur_timestamp < mints) {
+        if (!cur || (!rep->is_last && rep->cur_timestamp < mints)) {
             cur = rep;
             mints = rep->cur_timestamp;
         }
@@ -2228,6 +2291,7 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
         return AVERROR_INVALIDDATA;
     }
     while (!ff_check_interrupt(c->interrupt_callback) && !ret) {
+        av_log(c, AV_LOG_VERBOSE, "av_read_frame: %s\n", rep->url_template);
         ret = av_read_frame(cur->ctx, pkt);
         if (ret >= 0) {
             /* If we got a packet, return it */
@@ -2243,6 +2307,8 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
             cur->is_restart_needed = 0;
         }
     }
+
+    av_log(c, AV_LOG_VERBOSE, "EOF 4: %s\n", rep->url_template);
     return AVERROR_EOF;
 }
 

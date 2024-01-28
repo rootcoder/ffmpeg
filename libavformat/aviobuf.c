@@ -539,8 +539,10 @@ static void fill_buffer(AVIOContext *s)
     int len             = s->buffer_size - (dst - s->buffer);
 
     /* can't fill the buffer without read_packet, just set EOF if appropriate */
-    if (!s->read_packet && s->buf_ptr >= s->buf_end)
+    if (!s->read_packet && s->buf_ptr >= s->buf_end) {
+        av_log(s, AV_LOG_VERBOSE, "fillbuffer eof 1\n");
         s->eof_reached = 1;
+    }
 
     /* no need to do anything if EOF already reached */
     if (s->eof_reached)
@@ -570,8 +572,10 @@ static void fill_buffer(AVIOContext *s)
     if (len == AVERROR_EOF) {
         /* do not modify buffer if EOF reached so that a seek back can
            be done without rereading data */
+           av_log(s, AV_LOG_VERBOSE, "fillbuffer eof 2\n");
         s->eof_reached = 1;
     } else if (len < 0) {
+        av_log(s, AV_LOG_VERBOSE, "fillbuffer eof 3\n");
         s->eof_reached = 1;
         s->error= len;
     } else {
@@ -580,6 +584,7 @@ static void fill_buffer(AVIOContext *s)
         s->buf_end = dst + len;
         ffiocontext(s)->bytes_read += len;
         s->bytes_read = ffiocontext(s)->bytes_read;
+        av_log(s, AV_LOG_VERBOSE, "fillbuffer ok\n");
     }
 }
 
@@ -635,19 +640,23 @@ int avio_read(AVIOContext *s, unsigned char *buf, int size)
     int len, size1;
 
     size1 = size;
+    av_log(s, AV_LOG_VERBOSE, "avio_read o%d %d\n", size1, size);
     while (size > 0) {
         len = FFMIN(s->buf_end - s->buf_ptr, size);
         if (len == 0 || s->write_flag) {
             if((s->direct || size > s->buffer_size) && !s->update_checksum && s->read_packet) {
                 // bypass the buffer and read data directly into buf
+                av_log(s, AV_LOG_VERBOSE, "avio_read read_packet\n");
                 len = read_packet_wrapper(s, buf, size);
                 if (len == AVERROR_EOF) {
                     /* do not modify buffer if EOF reached so that a seek back can
                     be done without rereading data */
+                    av_log(s, AV_LOG_VERBOSE, "avio_read eof 1\n");
                     s->eof_reached = 1;
                     break;
                 } else if (len < 0) {
                     s->eof_reached = 1;
+                    av_log(s, AV_LOG_VERBOSE, "avio_read eof 2\n");
                     s->error= len;
                     break;
                 } else {
@@ -661,12 +670,14 @@ int avio_read(AVIOContext *s, unsigned char *buf, int size)
                     s->buf_end = s->buffer/* + len*/;
                 }
             } else {
+                av_log(s, AV_LOG_VERBOSE, "avio_read fillbuffer\n");
                 fill_buffer(s);
                 len = s->buf_end - s->buf_ptr;
                 if (len == 0)
                     break;
             }
         } else {
+            av_log(s, AV_LOG_VERBOSE, "avio_read memcpy\n");
             memcpy(buf, s->buf_ptr, len);
             buf += len;
             s->buf_ptr += len;
@@ -674,6 +685,7 @@ int avio_read(AVIOContext *s, unsigned char *buf, int size)
         }
     }
     if (size1 == size) {
+        av_log(s, AV_LOG_VERBOSE, "avio_read size1 == size %d %d\n", size1, size);
         if (s->error)      return s->error;
         if (avio_feof(s))  return AVERROR_EOF;
     }

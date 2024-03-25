@@ -558,6 +558,8 @@ static enum AVMediaType get_content_type(xmlNodePtr node)
     int i = 0;
     const char *attr;
     char *val = NULL;
+    char *val2 = NULL;
+    char *val3 = NULL;
 
     if (node) {
         for (i = 0; i < 2; i++) {
@@ -570,6 +572,25 @@ static enum AVMediaType get_content_type(xmlNodePtr node)
                     type = AVMEDIA_TYPE_AUDIO;
                 } else if (av_stristr(val, "text")) {
                     type = AVMEDIA_TYPE_SUBTITLE;
+                } else {
+                    val2 = xmlGetProp(node, "codecs");
+                    if (val2) {
+                        if (av_stristr(val2, "stpp")) {
+                            type = AVMEDIA_TYPE_SUBTITLE;
+                        } else 
+                        xmlFree(val2);
+                    } else if (node->children != NULL) {
+                        xmlNodePtr b = find_child_node_by_name(node, "Role");
+                        if (b != NULL) {
+                            val3 = xmlGetProp(b, "value");
+                            if (val3) {
+                                if (av_stristr(val3, "subtitle")) {
+                                    type = AVMEDIA_TYPE_SUBTITLE;
+                                }
+                                xmlFree(val3);
+                            }
+                        }
+                    }
                 }
                 xmlFree(val);
             }

@@ -934,7 +934,7 @@ static int mpegts_set_stream_info(AVStream *st, PESContext *pes,
     st->codecpar->codec_tag = pes->stream_type;
 
     mpegts_find_stream_type(st, pes->stream_type, ISO_types);
-    if (pes->stream_type == 4 || pes->stream_type == 0x0f)
+    if (pes->stream_type == 0x0f)
         sti->request_probe = 50;
     if ((prog_reg_desc == AV_RL32("HDMV") ||
          prog_reg_desc == AV_RL32("HDPR")) &&
@@ -2800,13 +2800,13 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet, int64_t pos)
 
     tss->last_cc = cc;
     if (!cc_ok) {
-        av_log(ts->stream, AV_LOG_DEBUG,
-               "Continuity check failed for pid %d expected %d got %d\n",
-               pid, expected_cc, cc);
-        if (tss->type == MPEGTS_PES) {
-            PESContext *pc = tss->u.pes_filter.opaque;
-            pc->flags |= AV_PKT_FLAG_CORRUPT;
-        }
+        // av_log(ts->stream, AV_LOG_DEBUG,
+        //        "Continuity check failed for pid %d expected %d got %d\n",
+        //        pid, expected_cc, cc);
+        // if (tss->type == MPEGTS_PES) {
+        //     PESContext *pc = tss->u.pes_filter.opaque;
+        //     pc->flags |= AV_PKT_FLAG_CORRUPT;
+        // }
     }
 
     if (packet[1] & 0x80) {

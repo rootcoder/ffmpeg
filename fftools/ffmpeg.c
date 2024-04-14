@@ -3671,6 +3671,55 @@ static void decode_flush(InputFile *ifile)
     }
 }
 
+static void ts_correct(InputFile *ifile, InputStream *ist,
+                                    AVPacket *pkt) {
+    if ((ist->par->codec_type == AVMEDIA_TYPE_VIDEO ||
+         ist->par->codec_type == AVMEDIA_TYPE_AUDIO) && (pkt->pts != AV_NOPTS_VALUE || pkt->dts != AV_NOPTS_VALUE)) {
+        int64_t ff_pts_error = 0;
+        int64_t ff_dts_error = 0;
+        int64_t ff_dts_threshold = av_rescale_q(dts_monotonicity_threshold, AV_TIME_BASE_Q, ist->st->time_base);
+        
+
+        //av_log(NULL, AV_LOG_INFO, "ts_correct -> pts:%s dts%s nextpts:%s mo:%s\n", av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(ist->next_pts), av_ts2str(ifile->ff_timestamp_monotonicity_offset));
+        // adjust the incoming packet by the accumulated monotonicity error
+        if (pkt->pts != AV_NOPTS_VALUE) {
+            pkt->pts += ifile->ff_timestamp_monotonicity_offset;
+            if (ist->next_pts != AV_NOPTS_VALUE) {
+                ff_pts_error = av_rescale_q(ist->next_pts, AV_TIME_BASE_Q, ist->st->time_base) - pkt->pts;
+            }
+        }
+        if (pkt->dts != AV_NOPTS_VALUE) {
+            pkt->dts += ifile->ff_timestamp_monotonicity_offset;
+            if (ist->next_dts != AV_NOPTS_VALUE) {
+                ff_dts_error = av_rescale_q(ist->next_dts, AV_TIME_BASE_Q, ist->st->time_base) - pkt->dts;
+            }
+        }
+
+      //  av_log(NULL, AV_LOG_INFO, "ts_correct 2 -> pts:%s dts%s nextpts:%s mo:%s\n", av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(ff_pts_error), av_ts2str(ff_dts_error));
+
+        
+
+        if (ff_dts_error > 0 || ff_dts_error < (-ff_dts_threshold) || ff_pts_error < (-ff_dts_threshold)) {
+            if (pkt->dts == AV_NOPTS_VALUE /*|| ist->next_dts != AV_NOPTS_VALUE*/) {
+                av_log(NULL, AV_LOG_INFO, "ts_correct [0][0] -> pts:%s dts%s nextpts:%s ff_dts_error:%s mo:%s\n", av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(ist->next_pts), av_ts2str(ff_dts_error), av_ts2str(ifile->ff_timestamp_monotonicity_offset));
+                pkt->pts += ff_pts_error;
+                ifile->ff_timestamp_monotonicity_offset += ff_pts_error;
+                av_log(NULL, AV_LOG_INFO, "Incoming PTS error %"PRId64", offsetting subsequent timestamps by %"PRId64" to correct\n", ff_pts_error, ifile->ff_timestamp_monotonicity_offset);
+                av_log(NULL, AV_LOG_INFO, "ts_correct [0][1] -> pts:%s dts%s nextpts:%s ff_dts_error:%s mo:%s\n", av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(ist->next_pts), av_ts2str(ff_dts_error), av_ts2str(ifile->ff_timestamp_monotonicity_offset));
+            }
+            else {
+                  av_log(NULL, AV_LOG_INFO, "ts_correct [1][0] -> pts:%s dts%s nextpts:%s ff_dts_error:%s mo:%s\n", av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(ist->next_pts), av_ts2str(ff_dts_error), av_ts2str(ifile->ff_timestamp_monotonicity_offset));
+                pkt->pts += ff_dts_error;
+                pkt->dts += ff_dts_error;
+                ifile->ff_timestamp_monotonicity_offset += ff_dts_error;
+                av_log(NULL, AV_LOG_INFO, "Incoming DTS error %"PRId64", offsetting subsequent timestamps by %"PRId64" to correct\n", ff_dts_error, ifile->ff_timestamp_monotonicity_offset);
+                    av_log(NULL, AV_LOG_INFO, "ts_correct [1][1] -> pts:%s dts%s nextpts:%s ff_dts_error:%s mo:%s\n", av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(ist->next_pts), av_ts2str(ff_dts_error), av_ts2str(ifile->ff_timestamp_monotonicity_offset));
+            }
+        }
+    }
+}
+
+
 static void ts_discontinuity_detect(InputFile *ifile, InputStream *ist,
                                     AVPacket *pkt)
 {
@@ -3749,7 +3798,9 @@ static void ts_discontinuity_process(InputFile *ifile, InputStream *ist,
         pkt->pts += offset;
 
     // detect timestamp discontinuities for audio/video
-    if ((ist->par->codec_type == AVMEDIA_TYPE_VIDEO ||
+    if (force_dts_monotonicity) {
+        ts_correct(ifile, ist, pkt);
+    } else if ((ist->par->codec_type == AVMEDIA_TYPE_VIDEO ||
          ist->par->codec_type == AVMEDIA_TYPE_AUDIO) &&
         pkt->dts != AV_NOPTS_VALUE)
         ts_discontinuity_detect(ifile, ist, pkt);

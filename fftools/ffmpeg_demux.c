@@ -1058,6 +1058,7 @@ int ifile_open(const OptionsContext *o, const char *filename)
     f->recording_time = recording_time;
     f->input_sync_ref = o->input_sync_ref;
     f->input_ts_offset = o->input_ts_offset;
+    f->ff_timestamp_monotonicity_offset = 0;
     f->ts_offset  = o->input_ts_offset - (copy_ts ? (start_at_zero && ic->start_time != AV_NOPTS_VALUE ? ic->start_time : 0) : timestamp);
     f->rate_emu   = o->rate_emu;
     f->accurate_seek = o->accurate_seek;

@@ -482,6 +482,7 @@ typedef struct InputFile {
      * the last frame duration back to the demuxer thread */
     AVThreadMessageQueue *audio_duration_queue;
     int                   audio_duration_queue_size;
+    int64_t ff_timestamp_monotonicity_offset;
 } InputFile;
 
 enum forced_keyframes_const {
@@ -724,6 +725,9 @@ extern char *sdp_filename;
 extern float audio_drift_threshold;
 extern float dts_delta_threshold;
 extern float dts_error_threshold;
+
+extern int dts_monotonicity_threshold;
+extern int force_dts_monotonicity;
 
 extern enum VideoSyncMethod video_sync_method;
 extern float frame_drop_threshold;

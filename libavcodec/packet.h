@@ -299,6 +299,8 @@ enum AVPacketSideDataType {
      */
     AV_PKT_DATA_DYNAMIC_HDR10_PLUS,
 
+    AV_PKT_DATA_DISCONTINUITY,
+
     /**
      * The number of side data types.
      * This is not part of the public API/ABI in the sense that it may

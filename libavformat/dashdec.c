@@ -1616,7 +1616,7 @@ static int refresh_manifest(AVFormatContext *s)
         if (cur_video->timelines) {
             // calc current time
             int64_t currentTime;
-            if (cur_video->start_number_assigned) {
+            if (cur_video->start_number_assigned && c->is_live) {
                 currentTime = get_segment_start_time_based_on_timeline_with_first_seq_no(cur_video, cur_video->cur_seq_no, cur_video->first_seq_no) / cur_video->fragment_timescale;
             } else {
                 currentTime = get_segment_start_time_based_on_timeline(cur_video, cur_video->cur_seq_no) / cur_video->fragment_timescale;
@@ -1624,7 +1624,7 @@ static int refresh_manifest(AVFormatContext *s)
             // update segments
             ccur_video->cur_seq_no = calc_next_seg_no_from_timelines(ccur_video, currentTime * cur_video->fragment_timescale - 1);
             if (ccur_video->cur_seq_no >= 0) {
-                if (cur_video->start_number_assigned) {
+                if (cur_video->start_number_assigned && c->is_live) {
                     ccur_video->cur_seq_no += ccur_video->first_seq_no;
                 }
                 move_timelines(ccur_video, cur_video, c);
@@ -1641,7 +1641,7 @@ static int refresh_manifest(AVFormatContext *s)
         if (cur_audio->timelines) {
             // calc current time
             int64_t currentTime;
-            if (cur_audio->start_number_assigned) {
+            if (cur_audio->start_number_assigned && c->is_live) {
                 currentTime = get_segment_start_time_based_on_timeline_with_first_seq_no(cur_audio, cur_audio->cur_seq_no, cur_audio->first_seq_no) / cur_audio->fragment_timescale;
             } else {
                 currentTime = get_segment_start_time_based_on_timeline(cur_audio, cur_audio->cur_seq_no) / cur_audio->fragment_timescale;
@@ -1649,7 +1649,7 @@ static int refresh_manifest(AVFormatContext *s)
             // update segments
             ccur_audio->cur_seq_no = calc_next_seg_no_from_timelines(ccur_audio, currentTime * cur_audio->fragment_timescale - 1);
             if (ccur_audio->cur_seq_no >= 0) {
-                if (cur_audio->start_number_assigned) {
+                if (cur_audio->start_number_assigned && c->is_live) {
                     ccur_audio->cur_seq_no += ccur_audio->first_seq_no;
                 }
                 move_timelines(ccur_audio, cur_audio, c);
@@ -1666,10 +1666,19 @@ static int refresh_manifest(AVFormatContext *s)
         struct representation *ccur_sub = c->subtitles[i]; // next state
         if (cur_sub->timelines) {
             // calc current time
-            int64_t currentTime = get_segment_start_time_based_on_timeline(cur_sub, cur_sub->cur_seq_no) / cur_sub->fragment_timescale;
+            int64_t currentTime;
+
+            if (cur_sub->start_number_assigned && c->is_live) {
+                currentTime = get_segment_start_time_based_on_timeline_with_first_seq_no(cur_sub, cur_sub->cur_seq_no, cur_sub->first_seq_no) / cur_sub->fragment_timescale;
+            } else {
+                currentTime = get_segment_start_time_based_on_timeline(cur_sub, cur_sub->cur_seq_no) / cur_sub->fragment_timescale;
+            }
             // update segments
             ccur_sub->cur_seq_no = calc_next_seg_no_from_timelines(ccur_sub, currentTime * cur_sub->fragment_timescale - 1);
             if (ccur_sub->cur_seq_no >= 0) {
+                if (cur_sub->start_number_assigned && c->is_live) {
+                    ccur_sub->cur_seq_no += ccur_sub->first_seq_no;
+                }
                 move_timelines(ccur_sub, cur_sub, c);
                 cur_sub->is_last = false;
             } else {
@@ -2340,7 +2349,13 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
         ret = av_read_frame(cur->ctx, pkt);
         if (ret >= 0) {
             if (c->has_sent != HAS_SENT && cur->type == TYPE_VIDEO) {
-                c->first_time = (get_segment_start_time_based_on_timeline(cur, cur->cur_seq_no) / (double)(cur->fragment_timescale)) * 1000;
+
+                if (cur->start_number_assigned && c->is_live) {
+                    c->first_time  = get_segment_start_time_based_on_timeline_with_first_seq_no(cur, cur->cur_seq_no, cur->first_seq_no) / (double)(cur->fragment_timescale);
+                } else {
+                    c->first_time = get_segment_start_time_based_on_timeline(cur, cur->cur_seq_no) / (double)(cur->fragment_timescale);
+                }
+                c->first_time *= 1000;
                 c->has_sent = HAS_SENT;
             } else if (cur->type == TYPE_SUB) { // subtitle
                 first_time = c->first_time;

@@ -1,4 +1,4 @@
-/*
+ /*
  * TTML subtitle decoder
  * Copyright (c) 2023 Aidan Vaughan (TheDaChicken)
  *
@@ -26,6 +26,7 @@
 #include "codec_internal.h"
 #include "version.h"
 #include "libavutil/bprint.h"
+#include "libavutil/mem.h"
 #include "libavutil/parseutils.h"
 #include "stdio.h"
 
